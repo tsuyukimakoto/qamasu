@@ -14,6 +14,7 @@ class Job(models.Model):
   enqueue_time = models.DateTimeField(editable=False, blank=True, db_index=True)
   grabbed_until = models.DateTimeField(editable=False, blank=True, default=0)
   retry_cnt = models.PositiveSmallIntegerField(blank=True, default=0)
+  priority = models.PositiveSmallIntegerField(blank=True, default=5)
   
   def save(self):
     if not self.id:

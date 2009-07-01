@@ -68,14 +68,17 @@ class Manager(object):
   def has_abilities(self):
     return self.func_map.keys()
   
-  def enqueue(self, funcname, arg, uniqkey):
+  def enqueue(self, funcname, arg, uniqkey, priority=None):
     func_id = self._func_id_cache.get(funcname, None)
     if not func_id:
       func = Func.objects.get(name=funcname)
       func_id = func.id
       self._func_id_cache[funcname] = func_id
     json_arg = json.dumps(arg, ensure_ascii=False)
-    job = Job(func_id=func_id, arg=json_arg, uniqkey=uniqkey)
+    if priority:
+      job = Job(func_id=func_id, arg=json_arg, uniqkey=uniqkey, priority=priority)
+    else:
+      job = Job(func_id=func_id, arg=json_arg, uniqkey=uniqkey)
     job.save()
     return job
   
@@ -90,8 +93,8 @@ class Manager(object):
   def dequeue(self, job):
     Job.objects.filter(pk=job.id).delete()
   
-  def work_once(self):
-    job = self.find_job()
+  def work_once(self, prioritizing=False):
+    job = self.find_job(prioritizing=prioritizing)
     if not job:
       return None
     worker_module = load_module(job.funcname)
@@ -106,8 +109,12 @@ class Manager(object):
     job_list = Job.objects.filter(pk=job_id)
     return self._grab_a_job(job_list)
   
-  def find_job(self):
+  def find_job(self, prioritizing=False):
     job_list = Job.objects.filter(func__name__in=self.func_map.keys())
+    if prioritizing:
+      job_list = job_list.order_by('priority', 'id')
+    else:
+      job_list = job_list.order_by('id')
     return self._grab_a_job(job_list[:self.find_job_limit_size])
 
   def _grab_a_job(self, job_list):
@@ -160,23 +167,26 @@ class Qamasu(object):
                               abilities=self.manager_abilities)
     return self._manager
   
-  def enqueue(self, funcname, arg, uniqkey):
-    self.manager.enqueue(funcname, arg, uniqkey)
+  def enqueue(self, funcname, arg, uniqkey, priority=None):
+    self.manager.enqueue(funcname, arg, uniqkey, priority=priority)
   
-  def work(self, work_delay=5):
+  def work(self, work_delay=5, prioritizing=False):
     if not self.manager.has_abilities():
       logging.error('manager dose not have abilities.')
       import sys
       sys.exit(-1)
     while 1:
-      if not self.manager.work_once():
+      if not self.manager.work_once(prioritizing=prioritizing):
         time.sleep(work_delay)
+  
+  def work_prioritizing(self, work_delay=5):
+    self.work(work_delay=work_delay, prioritizing=True)
   
   def purge(self):
     Job.objects.all().delete()
   
   def job_list(self, funcs=None):
-    query = Job.objects.all()
+    query = Job.objects.all().order_by('id')
     if funcs:
       query = query.filter(func__name__in=funcs)
     return query.filter(grabbed_until__lte=datetime.now())[:self.find_job_limit_size]
