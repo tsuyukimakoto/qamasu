@@ -151,6 +151,7 @@ class Qamasu(object):
   """
   >>> from qamasu import Qamasu
   >>> qamasu = Qamasu(['workers.random_wait',])
+  True
   >>> qamasu.work()
   """
   def __init__(self, manager_abilities, find_job_limit_size=FIND_JOB_LIMIT_SIZE, retry_seconds=RETRY_SECONDS):
@@ -167,7 +168,9 @@ class Qamasu(object):
                               abilities=self.manager_abilities)
     return self._manager
   
-  def enqueue(self, funcname, arg, uniqkey, priority=None):
+  def enqueue(self, funcname, arg, uniqkey=None, priority=None):
+    if not uniqkey:
+      uniqkey = uuid().hex
     self.manager.enqueue(funcname, arg, uniqkey, priority=priority)
   
   def work(self, work_delay=5, prioritizing=False):
