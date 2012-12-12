@@ -10,6 +10,8 @@ import logging
 from django.db import connection, transaction
 from uuid import uuid4 as uuid
 
+from django.conf import settings
+
 from qamasu.models import Func, Job, ExceptionLog
 
 RETRY_SECONDS = 5;
@@ -34,10 +36,12 @@ class QamasuJob(object):
     self.manager = manager
     self.org_job = job_data
     self.completed = False
+    logging.debug('Job id:%d initialize complete.' % (self.id,))
   
   def complete(self):
     self.manager.dequeue(self)
     self.completed = True
+    logging.debug('Job id:%d completed.' % (self.id,))
   
   @property
   def is_completed(self):
@@ -45,6 +49,7 @@ class QamasuJob(object):
 
   def reenqueue(self, args):
     self.manager.reenqueue(self, args);
+    logging.debug('Job id:%d retry(enqueued).' % (self.id,))
 
 
 class Manager(object):
@@ -54,8 +59,8 @@ class Manager(object):
     self.func_map = {}
     self.abilities = abilities
     self._func_id_cache = {}
-    
     self.register_abilities(self.abilities)
+    self.set_isolation_level = False
 
   def register_abilities(self, abilities):
     for ability in abilities:
@@ -67,7 +72,7 @@ class Manager(object):
 
   def has_abilities(self):
     return self.func_map.keys()
-  
+
   def enqueue(self, funcname, arg, uniqkey, priority=None):
     func_id = self._func_id_cache.get(funcname, None)
     if not func_id:
@@ -93,9 +98,11 @@ class Manager(object):
   def dequeue(self, job):
     Job.objects.filter(pk=job.id).delete()
   
+  @transaction.autocommit
   def work_once(self, prioritizing=False):
     job = self.find_job(prioritizing=prioritizing)
     if not job:
+      logging.debug('No Job.')
       return None
     worker_module = load_module(job.funcname)
     res = None
@@ -132,7 +139,7 @@ class Manager(object):
                             grabbed_until=server_time + timedelta(seconds=worker_mod.GRAB_FOR)
                           )
       if not grabbed:
-        logging.debug("job(%d) is not found. Could be grabbed another worker.")
+        logging.debug("job(%d) is not found. Could be grabbed another worker.", job_data.id)
         continue
       grab_job = Job.objects.get(pk=job_data.id, uniqkey=new_uniqkey)
       logging.debug('NEW:%s' % grab_job.grabbed_until)
@@ -160,6 +167,7 @@ class Qamasu(object):
     self._manager = None
     self.manager_abilities = manager_abilities
 
+
   @property
   def manager(self):
     if not self._manager:
@@ -173,6 +181,7 @@ class Qamasu(object):
       uniqkey = uuid().hex
     self.manager.enqueue(funcname, arg, uniqkey, priority=priority)
   
+  @transaction.autocommit
   def work(self, work_delay=5, prioritizing=False):
     if not self.manager.has_abilities():
       logging.error('manager dose not have abilities.')
