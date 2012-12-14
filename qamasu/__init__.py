@@ -42,6 +42,8 @@ from qamasu.models import Func, Job, ExceptionLog
 RETRY_SECONDS = 5;
 FIND_JOB_LIMIT_SIZE = 4;
 
+logger = logging.getLogger('qamasu')
+
 def load_module(name):
   mod = __import__(name)
   components = name.split('.')
@@ -61,12 +63,12 @@ class QamasuJob(object):
     self.manager = manager
     self.org_job = job_data
     self.completed = False
-    logging.debug('Job id:%d initialize complete.' % (self.id,))
+    logger.debug('Job id:%d initialize complete.' % (self.id,))
   
   def complete(self):
     self.manager.dequeue(self)
     self.completed = True
-    logging.debug('Job id:%d completed.' % (self.id,))
+    logger.debug('Job id:%d completed.' % (self.id,))
   
   @property
   def is_completed(self):
@@ -74,7 +76,7 @@ class QamasuJob(object):
 
   def reenqueue(self, args):
     self.manager.reenqueue(self, args);
-    logging.debug('Job id:%d retry(enqueued).' % (self.id,))
+    logger.debug('Job id:%d retry(enqueued).' % (self.id,))
 
 
 class Manager(object):
@@ -127,7 +129,7 @@ class Manager(object):
   def work_once(self, prioritizing=False):
     job = self.find_job(prioritizing=prioritizing)
     if not job:
-      logging.debug('No Job.')
+      logger.debug('No Job.')
       return None
     worker_module = load_module(job.funcname)
     res = None
@@ -164,10 +166,10 @@ class Manager(object):
                             grabbed_until=server_time + timedelta(seconds=worker_mod.GRAB_FOR)
                           )
       if not grabbed:
-        logging.debug("job(%d) is not found. Could be grabbed another worker.", job_data.id)
+        logger.debug("job(%d) is not found. Could be grabbed another worker.", job_data.id)
         continue
       grab_job = Job.objects.get(pk=job_data.id, uniqkey=new_uniqkey)
-      logging.debug('NEW:%s' % grab_job.grabbed_until)
+      logger.debug('NEW:%s' % grab_job.grabbed_until)
       job = QamasuJob(manager=self, job_data=job_data)
       return job
     return None
@@ -191,6 +193,7 @@ class Qamasu(object):
     self.retry_seconds = retry_seconds
     self._manager = None
     self.manager_abilities = manager_abilities
+    self.gentle_terminate = False
 
 
   @property
@@ -209,12 +212,41 @@ class Qamasu(object):
   @transaction.autocommit
   def work(self, work_delay=5, prioritizing=False):
     if not self.manager.has_abilities():
-      logging.error('manager dose not have abilities.')
+      logger.error('manager dose not have abilities.')
       import sys
       sys.exit(-1)
     while 1:
+      if self.gentle_terminate:
+        logger.info('gentle terminate')
+        break
       if not self.manager.work_once(prioritizing=prioritizing):
         time.sleep(work_delay)
+
+  def handle_terminate(self, *args):
+    '''
+    # for python-daemon
+    import signal
+    from daemon import DaemonContext
+    from lockfile.pidlockfile import PIDLockFile
+
+    from qamasu import Qamasu
+
+    qamasu = Qamasu(['workers.random_wait',])
+
+    dc = DaemonContext(
+      pidfile=PIDLockFile('/tmp/mydaemon.pid'),
+      stdout=open('fake_out_console.txt', 'w+'),
+      stderr=open('fake_err_console.txt', 'w+')
+    )
+    dc.signal_map[signal.SIGTERM] = qamasu.handle_terminate
+
+    with dc:
+      import os
+      print(os.environ)
+      qamasu.work()
+    '''
+    logger.info('preparing gentle terminate')
+    self.gentle_terminate = True
   
   def work_prioritizing(self, work_delay=5):
     self.work(work_delay=work_delay, prioritizing=True)
