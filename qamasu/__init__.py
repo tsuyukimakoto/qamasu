@@ -28,7 +28,11 @@ try:
 except ImportError:
   import simplejson as json
 
-from datetime import datetime, timedelta
+try:
+  from django.utils import timezone as datetime
+except ImportError:
+  from datetime import datetime
+from datetime import timedelta
 import time
 import logging
 
@@ -144,7 +148,8 @@ class Manager(object):
     return self._grab_a_job(job_list)
   
   def find_job(self, prioritizing=False):
-    job_list = Job.objects.filter(func__name__in=self.func_map.keys())
+    job_list = Job.objects.filter(func__name__in=self.func_map.keys(),
+      grabbed_until__lte=datetime.now())
     if prioritizing:
       job_list = job_list.order_by('priority', 'id')
     else:
@@ -234,15 +239,14 @@ class Qamasu(object):
     qamasu = Qamasu(['workers.random_wait',])
 
     dc = DaemonContext(
-      pidfile=PIDLockFile('/tmp/mydaemon.pid'),
-      stdout=open('fake_out_console.txt', 'w+'),
-      stderr=open('fake_err_console.txt', 'w+')
+      pidfile=PIDLockFile('/var/run/qamasu_daemon.pid'),
+      stdout=open('/var/log/qamasu/out.log', 'w+'),
+      stderr=open('/var/log/qamasu/err.log', 'w+')
     )
     dc.signal_map[signal.SIGTERM] = qamasu.handle_terminate
 
     with dc:
       import os
-      print(os.environ)
       qamasu.work()
     '''
     logger.info('preparing gentle terminate')
