@@ -1,6 +1,11 @@
 from django.db import models
 
-from datetime import datetime, timedelta
+try:
+  from django.utils import timezone as datetime
+except ImportError:
+  from datetime import datetime
+
+from datetime import timedelta
 import time
 
 class Func(models.Model):
